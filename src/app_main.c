@@ -22,9 +22,18 @@ int main(void) {
     usbpd_phy_cc_rd_enable(PD_CC1, 1);
     usbpd_phy_cc_rd_enable(PD_CC2, 1);
 
+    usbpd_phy_set_active_cc(PD_CC1);
+
     while (1) {
         delay_ms(5000);
 
+        usbpd_phy_set_active_cc(PD_CC1);
+        for (int i = 0; i < 100; i++) {
+            usbpd_phy_send_ping();
+            delay_us(500 - 7);  // 500 - 7 大概是 1ms 间隔，注释掉后大概 504us 间隔
+        }
+
+        usbpd_phy_set_active_cc(PD_CC2);
         for (int i = 0; i < 100; i++) {
             usbpd_phy_send_ping();
             delay_us(500 - 7);  // 500 - 7 大概是 1ms 间隔，注释掉后大概 504us 间隔
