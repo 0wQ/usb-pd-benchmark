@@ -3,6 +3,7 @@
 #include <ch32x035.h>
 #include "delay.h"
 
+static uint8_t usbpd_rx_buffer[USBPD_DATA_MAX_LEN] __attribute__((aligned(4)));
 static uint8_t usbpd_tx_buffer[USBPD_DATA_MAX_LEN] __attribute__((aligned(4)));
 
 void usbpd_phy_init(void) {
@@ -29,9 +30,7 @@ void usbpd_phy_init(void) {
 
     // 设置默认的 CC 电压比较器
     PORT_CC1_REG |= CC_CMP_DEFAULT;
-    PORT_CC1_REG |= CC_PU_180;
     PORT_CC2_REG |= CC_CMP_DEFAULT;
-    PORT_CC2_REG |= CC_PU_180;
 
     // 设置 CC 以正常 VDD 电压驱动输出
     PORT_CC1_REG &= ~CC_LVE;
@@ -40,12 +39,8 @@ void usbpd_phy_init(void) {
     // 清除全部状态
     USBPD->STATUS = BUF_ERR | IF_RX_BIT | IF_RX_BYTE | IF_RX_ACT | IF_RX_RESET | IF_TX_END;
 
-    // 清除所有中断标志位
-    USBPD->CONFIG |= PD_ALL_CLR;
-    USBPD->CONFIG &= ~PD_ALL_CLR;
-
-    // DMA 使能
-    USBPD->CONFIG |= PD_DMA_EN;
+    // 配置为接收模式
+    usbpd_phy_set_rx();
 
     NVIC_SetPriority(USBPD_IRQn, 0);
     NVIC_EnableIRQ(USBPD_IRQn);
@@ -162,12 +157,30 @@ void usbpd_phy_set_active_cc(usbpd_cc_channel_t cc_channel) {
     }
 }
 
-void usbpd_phy_tx(uint8_t data_len, uint8_t sop) __attribute__((section(".highcode")));
-void usbpd_phy_tx(uint8_t data_len, uint8_t sop) {
-    if (data_len > USBPD_DATA_MAX_LEN) {
-        data_len = USBPD_DATA_MAX_LEN;
-    }
+void usbpd_phy_set_rx(void) {
+    // 设置 CC 正常 VDD 电压驱动输出
+    PORT_CC1_REG &= ~CC_LVE;
+    PORT_CC2_REG &= ~CC_LVE;
 
+    // 清除所有中断标志位
+    USBPD->CONFIG |= PD_ALL_CLR;
+    USBPD->CONFIG &= ~PD_ALL_CLR;
+
+    // 中断使能
+    USBPD->CONFIG |= IE_TX_END | IE_RX_ACT | IE_RX_RESET;
+    // DMA 使能
+    USBPD->CONFIG |= PD_DMA_EN;
+
+    // 设置为接收模式
+    USBPD->DMA = (uint32_t)usbpd_rx_buffer;  // DMA Buffer
+    USBPD->BMC_CLK_CNT = UPD_TMR_RX_48M;     // BMC 接收采样时钟计数器
+
+    // 开始接收
+    USBPD->CONTROL &= ~PD_TX_EN;  // PD 接收使能
+    USBPD->CONTROL |= BMC_START;  // BMC 开始信号
+}
+
+void usbpd_phy_set_tx(uint8_t tx_len, uint8_t sop) {
     // 设置 CC 低电压驱动输出
     if (IS_CC1_ACTIVE()) {
         PORT_CC1_REG |= CC_LVE;
@@ -175,17 +188,27 @@ void usbpd_phy_tx(uint8_t data_len, uint8_t sop) {
         PORT_CC2_REG |= CC_LVE;
     }
 
-    USBPD->BMC_CLK_CNT = UPD_TMR_TX_48M;
-    USBPD->TX_SEL = sop;
-    USBPD->DMA = (uint32_t)usbpd_tx_buffer;
-    USBPD->BMC_TX_SZ = data_len;
+    // 清除所有中断标志位
+    USBPD->CONFIG |= PD_ALL_CLR;
+    USBPD->CONFIG &= ~PD_ALL_CLR;
 
-    USBPD->STATUS |= IF_TX_END;   // 发送完成中断标志
+    // 中断使能
+    USBPD->CONFIG |= IE_TX_END | IE_RX_ACT | IE_RX_RESET;
+    // DMA 使能
+    USBPD->CONFIG |= PD_DMA_EN;
+
+    // 设置为发送模式
+    USBPD->DMA = (uint32_t)usbpd_tx_buffer;  // DMA Buffer
+    USBPD->BMC_CLK_CNT = UPD_TMR_TX_48M;     // BMC 发送采样时钟计数器
+    USBPD->BMC_TX_SZ = tx_len;
+
+    // 开始发送
+    USBPD->STATUS |= IF_TX_END;   //
     USBPD->CONTROL |= PD_TX_EN;   // PD 发送使能
-    USBPD->CONTROL |= BMC_START;  // BMC 发送开始信号
+    USBPD->CONTROL |= BMC_START;  // BMC 开始信号
 
     // wait tx end
-    while ((USBPD->STATUS & IF_TX_END) == 0);
+    while (((USBPD->STATUS & IF_TX_END) == 0) && (USBPD->CONTROL & PD_TX_EN));
 }
 
 void usbpd_phy_send_src_cap(void) {
@@ -238,14 +261,14 @@ void usbpd_phy_send_src_cap(void) {
     *(uint32_t *)&usbpd_tx_buffer[22] = src_pdo_pos6.d32;
     *(uint32_t *)&usbpd_tx_buffer[26] = src_pdo_pos7.d32;
 
-    usbpd_phy_tx((2 + 4 * 7), UPD_SOP0);
+    usbpd_phy_set_tx((2 + 4 * 7), UPD_SOP0);
 }
 
 void usbpd_phy_send_ping(void) {
     USBPD_MessageHeader_t header = {0};
     header.MessageHeader.MessageType = USBPD_CONTROL_MSG_PING;
     *(uint16_t *)&usbpd_tx_buffer[0] = header.d16;
-    usbpd_phy_tx(2, UPD_SOP0);
+    usbpd_phy_set_tx(2, UPD_SOP0);
 }
 
 void USBPD_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast"))) __attribute__((section(".highcode")));
@@ -262,6 +285,9 @@ void USBPD_IRQHandler(void) {
     // 发送完成中断标志
     if (USBPD->STATUS & IF_TX_END) {
         USBPD->STATUS |= IF_TX_END;
+
+        // 恢复为接收模式
+        usbpd_phy_set_rx();
 
         // 清除所有中断标志位
         USBPD->CONFIG |= PD_ALL_CLR;

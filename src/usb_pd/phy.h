@@ -13,5 +13,8 @@ void usbpd_phy_cc_ra_enable(usbpd_cc_channel_t cc_channel, bool en);
 
 void usbpd_phy_set_active_cc(usbpd_cc_channel_t cc_channel);
 
+void usbpd_phy_set_rx(void);
+void usbpd_phy_set_tx(uint8_t tx_len, uint8_t sop);
+
 void usbpd_phy_send_src_cap(void) __attribute__((section(".highcode")));
 void usbpd_phy_send_ping(void) __attribute__((section(".highcode")));
