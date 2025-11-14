@@ -1,0 +1,20 @@
+---
+BasedOnStyle: LLVM
+
+IndentWidth: 4
+TabWidth: 4
+ColumnLimit: 0
+SpacesBeforeTrailingComments: 2
+
+IndentCaseLabels: true
+AllowShortLoopsOnASingleLine: true
+AllowShortIfStatementsOnASingleLine: true
+AlignTrailingComments: true
+AlignConsecutiveBitFields: true
+AllowShortCaseLabelsOnASingleLine: true
+
+IndentPPDirectives: BeforeHash
+SortIncludes: Never
+AlignConsecutiveMacros:
+  Enabled: true
+  AcrossEmptyLines: false
